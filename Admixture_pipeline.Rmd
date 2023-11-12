@@ -1,0 +1,333 @@
+---
+title: "Admixture"
+author: "Estela Bruxel"
+date: "11/10/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+#Transform VCF files in Plink files
+
+```{plink filtering}
+
+# Transform vcf in plink files of MTLE samples
+/storage/atkinson/shared_resources/software/plink2/plink2 \
+--vcf /storage/atkinson/home/u246808/estelaArray.recode.vcf.gz \
+--allow-extra-chr \
+--const-fid \
+--maf 0.005 \
+--snps-only just-acgt \
+--max-alleles 2 \
+--make-bed \
+--out mtle_2022 \
+
+# Transform vcf in plink files of DNA do Brasil samples
+/storage/atkinson/shared_resources/software/plink2/plink2 \
+--vcf /storage/atkinson/home/u246808/dnabr.hg38.700.vcf.gz \
+--allow-extra-chr \
+--const-fid \
+--maf 0.005 \
+--snps-only just-acgt \
+--max-alleles 2 \
+--allow-extra-chr \
+--make-bed \
+--out dnabr_2022 \
+
+#Transform vcf in plink files of 1KG+HGDP
+/storage/atkinson/shared_resources/software/plink2/plink2 \
+--vcf /storage/atkinson/shared_resources/reference/1kG_HGDP_jointcall/filtered/hgdp_tgp_filtered_postoutlier.vcf.gz \
+--allow-extra-chr \
+--const-fid \
+--maf 0.005 \
+--snps-only just-acgt \
+--max-alleles 2 \
+--make-bed \
+--out 1kgp_hgdp_2022 \
+
+```
+# Recode the rsID to chromossome position to homogeneize the dataset
+
+```{r}
+
+dnabrsnp <- read.table("dnabr_2022.bim")
+mtlesnp <- read.table("mtle_2022.bim")
+referencepanelsnp <- read.table("1kgp_hgdp_2022.bim")
+
+#Recode SNP ID for chromossome position.
+
+recodesnpdnabr <- paste(dnabrsnp$V1,dnabrsnp$V4, sep = ":")
+recodesnpdmtle <- paste(mtlesnp$V1,mtlesnp$V4, sep = ":")
+recodesnppanel <- paste(referencepanelsnp$V1, referencepanelsnp$V4, sep = ":")
+
+dnabrsnp$V2<- recodesnpdnabr
+mtlesnp$V2 <- recodesnpdmtle
+referencepanelsnp$V2 <- recodesnppanel
+
+
+write.table(dnabrsnp,"dnabr_2022.bim",col.names = F,row.names = F,quote = F)
+write.table(mtlesnp,"mtle_2022.bim", col.names = F,row.names = F,quote = F)
+write.table(referencepanelsnp,"1kgp_hgdp_2022.bim",col.names = F,row.names = F,quote = F)
+````
+## Filtering by genotypes
+
+Create a list of ambiguous SNPs, which are those with A/T or G/C genotypes.
+
+```{r}
+# read SNP information from PLINK to R
+bsp.aut<-read.table('mtle_2022.bim')
+
+# extract the two alleles
+bsp.aut$gen<-paste0(bsp.aut$V5,bsp.aut$V6)
+
+# create a vector of the four possible combination of ambiguous SNPs
+transitions<-c("GC","CG","AT","TA")
+
+# extract ambiguous SNPs based on the vector created above
+ambiguous.SNPs<-droplevels(subset(bsp.aut,bsp.aut$gen %in% transitions))
+
+# create a file containing the SNP name from the ambiguous SNPs
+write.table(as.matrix(ambiguous.SNPs$V2),file='ambiguous_SNPs_mtle.txt',quote=F,row.names=F,col.names=F)
+
+#-------------------------DNABR-----------------
+# read SNP information from PLINK to R
+bsp.aut<-read.table('dnabr_2022.bim')
+
+# extract the two alleles
+bsp.aut$gen<-paste0(bsp.aut$V5,bsp.aut$V6)
+
+# create a vector of the four possible combination of ambiguous SNPs
+transitions<-c("GC","CG","AT","TA")
+
+# extract ambiguous SNPs based on the vector created above
+ambiguousDNABR.SNPs<-droplevels(subset(bsp.aut,bsp.aut$gen %in% transitions))
+
+# create a file containing the SNP name from the ambiguous SNPs
+write.table(as.matrix(ambiguous.SNPs$V2),file='ambiguous_SNPs_dnabr.txt',quote=F,row.names=F,col.names=F,quote = F)
+
+
+
+```
+
+# Extract SNP from 'Brazilian' dataset to merge them
+
+```{plink}
+
+#Filtered ambiguous SNPs, genotypes and individual call-rated 
+
+/storage/atkinson/shared_resources/software/plink_v19/plink \
+  --bfile mtle_2022 \
+  --exclude ambiguous_SNPs_mtle.txt \
+  --geno 0.10 \
+  --mind 0.20 \ 
+  --make-bed \
+  --out mtle_2022_QC \
+  --allow-extra-chr \
+  
+ 
+#Create a SNP list from the MTLE
+/storage/atkinson/shared_resources/software/plink2/plink2 \
+--bfile mtle_2022_QC \
+--write-snplist \
+--out mtle_2022_QC \
+--allow-extra-chr \
+
+#Extract SNP from DNA_BR 
+/storage/atkinson/shared_resources/software/plink2/plink2 \
+--bfile dnabr_2022_QC \
+--extract mtle_2022_QC.snplist \
+--make-bed \
+--out dnabr_2022_QC_snpextracted \
+--allow-extra-chr \
+
+#Create a SNP list from the DNA_BR
+/storage/atkinson/shared_resources/software/plink2/plink2 \
+--bfile dnabr_2022_QC_snpextracted \
+--write-snplist \
+--out dnabr_2022_QC_snpextracted \
+--allow-extra-chr \
+
+#Extract SNP from MTLE 
+/storage/atkinson/shared_resources/software/plink2/plink2 \
+  --allow-extra-chr \
+  --bfile mtle_2022_QC \
+  --extract dnabr_2022_QC_snpextracted.snplist \
+  --make-bed \
+  --out mtle_2022_QC_snpextracted \
+  
+#Try to merge 
+/storage/atkinson/shared_resources/software/plink_v19/plink \
+  --bfile mtle_2022_snpextracted \
+  --bmerge dnabr_2022_snpextracted \
+  --make-bed \
+  --out braziliandataset_2022 \
+  --allow-extra-chr \
+  
+#Try to flip 
+/storage/atkinson/shared_resources/software/plink_v19/plink \
+  --bfile mtle_2022_QC_snpextracted \
+  --flip braziliandataset_2022-merge.missnp \
+  --make-bed \
+  --out mtle_2022_QC_snpextracted_fliped \
+  --allow-extra-chr \
+
+#Try to merge again
+/storage/atkinson/shared_resources/software/plink_v19/plink \
+  --bfile mtle_2022_QC_snpextracted_fliped \
+  --bmerge dnabr_2022_QC_snpextracted \
+  --make-bed \
+  --out braziliandataset_2022 \
+  --allow-extra-chr \
+
+#If still appears some SNPs,  remove them from MTLE dataset
+/storage/atkinson/shared_resources/software/plink_v19/plink \
+  --bfile mtle_2022_QC_snpextracted \
+  --exclude braziliandataset_2022-merge.missnp \
+  --make-bed \
+  --out mtle_2022_QC_snpextracted_exclude \
+  --allow-extra-chr \
+
+# AND remove them from DNABR dataset
+/storage/atkinson/shared_resources/software/plink_v19/plink \
+  --bfile dnabr_2022_QC_snpextracted \
+  --exclude braziliandataset_2022-merge.missnp \
+  --make-bed \
+  --out dnabr_2022_QC_snpextracted_exclude \
+  --allow-extra-chr \
+  
+#Try to merge again
+/storage/atkinson/shared_resources/software/plink_v19/plink \
+  --bfile mtle_2022_QC_snpextracted_exclude \
+  --bmerge dnabr_2022_QC_snpextracted_exclude \
+  --make-bed \
+  --out braziliandataset_2022 \
+  --allow-extra-chr \  
+  
+
+````
+
+#Extract SNP from 'Brazilian' dataset to merge with reference panel
+
+```{plink}
+#Create a SNP list from estela dataset
+/storage/atkinson/shared_resources/software/plink2/plink2 \
+--bfile braziliandataset_2022 \
+--write-snplist \
+--out braziliandataset_2022 \
+--allow-extra-chr \
+
+#Extract SNP from reference panel 
+/storage/atkinson/shared_resources/software/plink2/plink2 \
+--bfile 1kgp_hgdp_2022 \
+--extract braziliandataset_2022.snplist \
+--make-bed \
+--out 1kgp_hgdp_2022_snpextracted \
+--allow-extra-chr \
+
+#Create a SNP list from reference panel
+/storage/atkinson/shared_resources/software/plink2/plink2 \
+--bfile 1kgp_hgdp_2022_snpextracted \
+--write-snplist \
+--out 1kgp_hgdp_2022_snpextracted \
+--allow-extra-chr \
+
+#Extract SNP from estela dataset
+/storage/atkinson/shared_resources/software/plink2/plink2 \
+  --allow-extra-chr \
+  --bfile braziliandataset_2022 \
+  --extract 1kgp_hgdp_2022_snpextracted.snplist \
+  --make-bed \
+  --out braziliandataset_2022_snpextracted \
+ 
+```
+
+# Keep just EUR, AFR, and AMR invidual
+  
+````{r}
+ reference_ID <- read.table("1kgp_hgdp_2022_snpextracted.fam")
+popinfo<- read.table("PopInfo_HGDP_1kG_jointcallset_filtered.txt")
+
+ref_id_info <- merge(reference_ID,popinfo, by.x = "V2", by.y = "V1")
+ID_contin<- ref_id_info[,c(2,1,7,8)]
+ID_contin$V2.y[ID_contin$V2.y=="Europe"]<-"EUR"
+ID_contin$V2.y[ID_contin$V2.y=="Africa"]<-"AFR"
+ID_contin$V2.y[ID_contin$V2.y=="America"]<-"AMR"
+
+#create a vector with continents to be analyzed
+continents <- c("EUR", "AFR", "AMR")
+groupsinterested <- droplevels(subset(ID_contin, ID_contin$V2.y %in% continents))
+
+keepcontinents <- groupsinterested[,c(1,2)]
+write.table(keepcontinents, "keepcontinents.txt", col.names = F,row.names = F)
+
+````
+
+````{plink}
+
+#Keep the continents interested
+/storage/atkinson/shared_resources/software/plink_v19/plink \
+--bfile 1kgp_hgdp_2022_snpextracted \
+--keep keepcontinents.txt \
+--out 1kgp_hgdp_2022_groupintererest \
+--allow-extra-chr \
+
+#Merge refence panel and brazilian datase
+/storage/atkinson/shared_resources/software/plink_v19/plink \
+  --bfile braziliandataset_2022_snpextracted \
+  --bmerge 1kgp_hgdp_2022_groupintererest \
+  --make-bed \
+  --out brazil_plus_reference_2022b \
+  --chr 1-22, 23 \
+  
+ # Prune dataset
+/storage/atkinson/shared_resources/software/plink_v19/plink \
+--bfile brazil_plus_reference_2022 \
+--indep-pairwise 50 5 0.2 \
+--out braz_ref.toprune \
+
+/storage/atkinson/shared_resources/software/plink_v19/plink \
+--bfile brazil_plus_reference_2022 \
+--extract braz_ref.toprune.prune.in \
+--out braz_ref.pruned \
+--make-bed
+````
+
+
+```{admixture}
+###Perform ADMIXTURE
+for k in {2..9};do \
+/storage/atkinson/shared_resources/software/admixture_linux-1.3.0/admixture \
+--cv /storage/atkinson/home/u246808/braz_ref.pruned.bed $k -j4 | tee log.brazil${k}.out; done
+````
+
+````{bash}
+# Get cross-validation and log-likelihood scores after the run is successful
+grep -h CV log.brazil*.out | sort -V
+grep -h loglikelihood log.brazil*.out | sort -V
+
+#Plot at pong software.  
+pong -m pong_filemap -i ind2pop.txt -n pop_order_expandednames.txt
+
+````
